@@ -1,63 +1,86 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { useStore } from '../store/useStore';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const CANVAS_TOKEN_KEY = 'canvas_access_token';
-const CANVAS_REFRESH_TOKEN_KEY = 'canvas_refresh_token';
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIGURATION
+// Replace CANVAS_CLIENT_ID with the Developer Key ID you receive from TAMU admins.
+// All other settings are fixed for canvas.tamu.edu.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Placeholder credentials - replace with real ones or inject via env vars
-const CLIENT_ID = 'YOUR_CANVAS_CLIENT_ID';
-const CLIENT_SECRET = 'YOUR_CANVAS_CLIENT_SECRET';
-const REDIRECT_URI = AuthSession.makeRedirectUri({
-    scheme: 'coursesync',
-});
+const CANVAS_DOMAIN = 'canvas.tamu.edu';
+const CANVAS_CLIENT_ID = 'YOUR_CLIENT_ID_HERE'; // ← paste Client ID from TAMU admins
+
+const CANVAS_TOKEN_KEY = 'canvas_access_token';
+const CANVAS_REFRESH_KEY = 'canvas_refresh_token';
+
+const discovery = {
+    authorizationEndpoint: `https://${CANVAS_DOMAIN}/login/oauth2/auth`,
+    tokenEndpoint: `https://${CANVAS_DOMAIN}/login/oauth2/token`,
+};
 
 export const canvasService = {
-    async login(domain: string) {
-        const authUrl = `https://${domain}/login/oauth2/auth?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=url:GET|/api/v1/courses`;
+    /**
+     * Initiates the Canvas OAuth 2.0 browser login flow.
+     * Opens canvas.tamu.edu in a browser, user logs in with TAMU credentials,
+     * and the app receives an access token automatically.
+     */
+    async loginWithOAuth() {
+        const redirectUri = AuthSession.makeRedirectUri({ scheme: 'coursesync', path: 'oauth' });
 
-        const result = await AuthSession.startAsync({
-            authUrl,
-            returnUrl: REDIRECT_URI,
+        const request = new AuthSession.AuthRequest({
+            clientId: CANVAS_CLIENT_ID,
+            redirectUri,
+            responseType: AuthSession.ResponseType.Code,
+            scopes: [],
+            usePKCE: false, // Canvas does not support PKCE — client_secret is used instead
+            extraParams: { purpose: 'CourseSync' },
         });
 
-        if (result.type === 'success' && result.params.code) {
-            // Exchange code for token
-            try {
-                const response = await axios.post(`https://${domain}/login/oauth2/token`, {
-                    grant_type: 'authorization_code',
-                    client_id: CLIENT_ID,
-                    client_secret: CLIENT_SECRET,
-                    redirect_uri: REDIRECT_URI,
-                    code: result.params.code,
-                });
+        await request.makeAuthUrlAsync(discovery);
+        const result = await request.promptAsync(discovery);
 
-                const { access_token, refresh_token, user } = response.data;
-
-                await SecureStore.setItemAsync(CANVAS_TOKEN_KEY, access_token);
-                if (refresh_token) {
-                    await SecureStore.setItemAsync(CANVAS_REFRESH_TOKEN_KEY, refresh_token);
-                }
-
-                // Update user store
-                useStore.getState().setPreferences({ canvasDomain: domain });
-
-                return user;
-            } catch (error) {
-                console.error('Canvas Token Exchange Failed', error);
-                throw error;
-            }
-        } else {
-            throw new Error('Canvas Login Cancelled or Failed');
+        if (result.type !== 'success' || !result.params.code) {
+            throw new Error('Login was cancelled or failed. Please try again.');
         }
+
+        // Exchange authorization code for access token
+        const tokenResponse = await axios.post(
+            `https://${CANVAS_DOMAIN}/login/oauth2/token`,
+            {
+                grant_type: 'authorization_code',
+                client_id: CANVAS_CLIENT_ID,
+                redirect_uri: redirectUri,
+                code: result.params.code,
+            }
+        );
+
+        const { access_token, refresh_token } = tokenResponse.data;
+        await SecureStore.setItemAsync(CANVAS_TOKEN_KEY, access_token);
+        if (refresh_token) {
+            await SecureStore.setItemAsync(CANVAS_REFRESH_KEY, refresh_token);
+        }
+
+        useStore.getState().setPreferences({ canvasDomain: CANVAS_DOMAIN });
+
+        // Fetch and return user profile to confirm login
+        const userResponse = await axios.get(`https://${CANVAS_DOMAIN}/api/v1/users/self`, {
+            headers: { Authorization: `Bearer ${access_token}` },
+        });
+        return userResponse.data;
     },
 
     async getToken() {
         return await SecureStore.getItemAsync(CANVAS_TOKEN_KEY);
+    },
+
+    async logout() {
+        await SecureStore.deleteItemAsync(CANVAS_TOKEN_KEY);
+        await SecureStore.deleteItemAsync(CANVAS_REFRESH_KEY);
     },
 
     async fetchCourses() {
@@ -68,9 +91,9 @@ export const canvasService = {
         const response = await axios.get(`https://${domain}/api/v1/courses`, {
             params: {
                 enrollment_state: 'active',
-                include: ['term', 'total_scores', 'syllabus_body']
+                include: ['term', 'total_scores', 'syllabus_body'],
             },
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${token}` },
         });
 
         return response.data;
@@ -81,15 +104,14 @@ export const canvasService = {
         const domain = useStore.getState().preferences.canvasDomain;
         if (!token || !domain) throw new Error('Not authenticated with Canvas');
 
-        // Handle pagination if needed, for now just fetch one page
         const response = await axios.get(`https://${domain}/api/v1/courses/${courseId}/assignments`, {
             params: {
                 per_page: 50,
-                include: ['submission']
+                include: ['submission'],
             },
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${token}` },
         });
 
         return response.data;
-    }
+    },
 };

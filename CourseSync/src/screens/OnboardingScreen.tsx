@@ -1,33 +1,28 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import {
+    View, Text, StyleSheet, TouchableOpacity,
+    ActivityIndicator, Platform, UIManager
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { canvasService } from '../services/canvas';
-import { useStore } from '../store/useStore';
 import { syncManager } from '../services/syncManager';
 
-export default function OnboardingScreen({ navigation }: any) {
-    const [domain, setDomain] = useState('');
-    const [loading, setLoading] = useState(false);
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
-    const handleConnect = async () => {
-        if (!domain) return;
+export default function OnboardingScreen({ navigation }: any) {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const handleLogin = async () => {
+        setError(null);
         setLoading(true);
         try {
-            // In a real app, this would trigger the OAuth flow
-            // For now, we simulate a successful connection with the domain
-
-            // await canvasService.login(domain); // Real call
-
-            // Mock success
-            useStore.getState().setPreferences({ canvasDomain: domain });
-
+            await canvasService.loginWithOAuth();
             await syncManager.performFullSync();
-
-            // Navigation is handled by AppNavigator listening to store state ideally, 
-            // or we can manually replace the stack.
-            // But here we might rely on the parent navigator to rerender based on auth state.
-        } catch (error) {
-            alert('Connection failed. Please check the domain.');
+        } catch (err: any) {
+            setError(err.message || 'Login failed. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -36,27 +31,41 @@ export default function OnboardingScreen({ navigation }: any) {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.content}>
-                <Text style={styles.title}>Welcome to CourseSync</Text>
-                <Text style={styles.subtitle}>Your all-in-one student productivity hub.</Text>
-
-                <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Enter your Canvas URL</Text>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="canvas.university.edu"
-                        value={domain}
-                        onChangeText={setDomain}
-                        autoCapitalize="none"
-                    />
+                {/* Logo / Hero */}
+                <View style={styles.logoContainer}>
+                    <View style={styles.logoCircle}>
+                        <Text style={styles.logoText}>CS</Text>
+                    </View>
                 </View>
 
+                <Text style={styles.title}>CourseSync</Text>
+                <Text style={styles.subtitle}>
+                    Your all-in-one student productivity hub.{'\n'}
+                    Syncs your Canvas courses, assignments, and grades.
+                </Text>
+
+                {error && (
+                    <View style={styles.errorBox}>
+                        <Text style={styles.errorText}>{error}</Text>
+                    </View>
+                )}
+
+                {/* Single login button — opens Canvas in-app browser */}
                 <TouchableOpacity
-                    style={[styles.button, (!domain || loading) && styles.disabledButton]}
-                    onPress={handleConnect}
-                    disabled={!domain || loading}
+                    style={[styles.button, loading && styles.disabledButton]}
+                    onPress={handleLogin}
+                    disabled={loading}
                 >
-                    {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>Connect Canvas</Text>}
+                    {loading ? (
+                        <ActivityIndicator color="#FFF" />
+                    ) : (
+                        <Text style={styles.buttonText}>Log in with Canvas</Text>
+                    )}
                 </TouchableOpacity>
+
+                <Text style={styles.footerNote}>
+                    You'll be redirected to canvas.tamu.edu to sign in with your TAMU credentials.
+                </Text>
             </View>
         </SafeAreaView>
     );
@@ -66,54 +75,90 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#F5F3EF',
-        justifyContent: 'center',
     },
     content: {
+        flex: 1,
         padding: 32,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    logoContainer: {
+        marginBottom: 24,
+    },
+    logoCircle: {
+        width: 88,
+        height: 88,
+        borderRadius: 44,
+        backgroundColor: '#007AFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#007AFF',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.35,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    logoText: {
+        color: '#FFF',
+        fontSize: 30,
+        fontWeight: 'bold',
+        letterSpacing: 1,
     },
     title: {
         fontSize: 32,
         fontWeight: 'bold',
+        color: '#111',
         marginBottom: 12,
-        color: '#333',
-        textAlign: 'center'
+        textAlign: 'center',
     },
     subtitle: {
-        fontSize: 16,
+        fontSize: 15,
         color: '#666',
-        marginBottom: 48,
+        marginBottom: 40,
         textAlign: 'center',
-        lineHeight: 24,
+        lineHeight: 23,
     },
-    inputContainer: {
-        marginBottom: 24,
+    errorBox: {
+        backgroundColor: '#FDECEA',
+        borderRadius: 10,
+        padding: 14,
+        marginBottom: 20,
+        width: '100%',
     },
-    label: {
+    errorText: {
+        color: '#C0392B',
         fontSize: 14,
-        fontWeight: '600',
-        marginBottom: 8,
-        color: '#333',
-    },
-    input: {
-        backgroundColor: '#FFF',
-        padding: 16,
-        borderRadius: 12,
-        fontSize: 16,
-        borderWidth: 1,
-        borderColor: '#EEE',
+        textAlign: 'center',
     },
     button: {
         backgroundColor: '#007AFF',
-        padding: 16,
-        borderRadius: 12,
+        paddingVertical: 16,
+        paddingHorizontal: 40,
+        borderRadius: 14,
         alignItems: 'center',
+        width: '100%',
+        shadowColor: '#007AFF',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
     },
     disabledButton: {
         backgroundColor: '#A0C4FF',
+        shadowOpacity: 0,
+        elevation: 0,
     },
     buttonText: {
         color: '#FFF',
         fontWeight: 'bold',
-        fontSize: 16,
-    }
+        fontSize: 17,
+        letterSpacing: 0.3,
+    },
+    footerNote: {
+        marginTop: 20,
+        fontSize: 13,
+        color: '#999',
+        textAlign: 'center',
+        lineHeight: 19,
+    },
 });

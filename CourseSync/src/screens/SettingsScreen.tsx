@@ -3,9 +3,9 @@ import { View, Text, StyleSheet, Switch, TouchableOpacity, Alert } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
 import { syncManager } from '../services/syncManager';
+import { canvasService } from '../services/canvas';
 import { getDB } from '../db';
-import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export default function SettingsScreen() {
     const preferences = useStore((state) => state.preferences);
@@ -20,6 +20,20 @@ export default function SettingsScreen() {
         setPreferences({ notificationsEnabled: !preferences.notificationsEnabled });
     };
 
+    const handleDisconnectCanvas = async () => {
+        Alert.alert('Disconnect Canvas', 'Are you sure you want to disconnect your Canvas account?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Disconnect',
+                style: 'destructive',
+                onPress: async () => {
+                    await canvasService.logout();
+                    setPreferences({ canvasDomain: null });
+                }
+            }
+        ]);
+    };
+
     const handleLogout = async () => {
         Alert.alert('Reset App', 'Are you sure? This will delete all local data.', [
             { text: 'Cancel', style: 'cancel' },
@@ -27,7 +41,7 @@ export default function SettingsScreen() {
                 text: 'Reset',
                 style: 'destructive',
                 onPress: async () => {
-                    await SecureStore.deleteItemAsync('canvas_access_token');
+                    await canvasService.logout();
                     const db = await getDB();
                     await db.closeAsync();
                     const dbPath = `${FileSystem.documentDirectory}SQLite/coursesync.db`;
@@ -63,8 +77,13 @@ export default function SettingsScreen() {
                 <Text style={styles.sectionTitle}>Accounts</Text>
                 <View style={styles.row}>
                     <Text style={styles.rowLabel}>Canvas</Text>
-                    <Text style={styles.statusText}>{preferences.canvasDomain ? 'Connected' : 'Not Connected'}</Text>
+                    <Text style={styles.statusText}>{preferences.canvasDomain ? preferences.canvasDomain : 'Not Connected'}</Text>
                 </View>
+                {preferences.canvasDomain && (
+                    <TouchableOpacity onPress={handleDisconnectCanvas} style={{ marginTop: 8 }}>
+                        <Text style={{ color: '#007AFF', fontSize: 14 }}>Disconnect Canvas</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
